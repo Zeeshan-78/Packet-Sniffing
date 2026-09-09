@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Packet Sniffer — How It Works</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Inter:wght@300;400;600;700&display=swap');
+
+  :root {
+    --bg:       #080c0d;
+    --bg2:      #0e1416;
+    --bg3:      #141b1d;
+    --green:    #00e676;
+    --cyan:     #00e5ff;
+    --yellow:   #ffea00;
+    --red:      #ff5252;
+    --purple:   #ce93d8;
+    --text:     #b2bec3;
+    --text2:    #dfe6e9;
+    --dim:      #546e7a;
+    --border:   #1e2d30;
+    --mono:     'JetBrains Mono', monospace;
+    --sans:     'Inter', sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    display: flex;
+  }
+
+  /* ── Sidebar ── */
+  nav {
+    position: fixed;
+    top: 0; left: 0;
+    width: 230px; height: 100vh;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 10;
+  }
+  nav .logo {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  nav ul { list-style: none; padding: 16px 0; }
+  nav ul li a {
+    display: block;
+    padding: 7px 20px;
+    color: var(--dim);
+    text-decoration: none;
+    font-size: 13px;
+    font-family: var(--mono);
+    border-left: 2px solid transparent;
+    transition: all .2s;
+  }
+  nav ul li a:hover,
+  nav ul li a.active {
+    color: var(--cyan);
+    border-left-color: var(--cyan);
+    background: rgba(0,229,255,.05);
+  }
+  nav ul li.group {
+    padding: 16px 20px 4px;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* ── Main ── */
+  main {
+    margin-left: 230px;
+    max-width: 860px;
+    padding: 60px 52px;
+    width: 100%;
+  }
+
+  /* ── Sections ── */
+  section { margin-bottom: 72px; }
+  h1 {
+    font-family: var(--mono);
+    font-size: 28px;
+    color: var(--green);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--cyan);
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--green);
+    margin: 28px 0 10px;
+    letter-spacing: 1px;
+  }
+  p { color: var(--text); margin-bottom: 14px; max-width: 68ch; }
+  strong { color: var(--text2); font-weight: 600; }
+  em { color: var(--yellow); font-style: normal; }
+
+  /* ── Banner ── */
+  .banner {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    padding: 24px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    line-height: 1.4;
+    margin-bottom: 36px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ── Code block ── */
+  pre, code {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  pre {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 20px 24px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 16px 0;
+    line-height: 1.6;
+  }
+  code { color: var(--cyan); }
+  pre code { color: var(--text2); }
+  .kw  { color: #bb86fc; }
+  .fn  { color: var(--green); }
+  .str { color: #f48fb1; }
+  .cm  { color: var(--dim); font-style: italic; }
+  .num { color: var(--yellow); }
+  .cls { color: var(--cyan); }
+
+  /* ── Flow diagram ── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .flow-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 36px;
+  }
+  .flow-dot {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--bg3);
+    border: 2px solid var(--cyan);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--cyan);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .flow-line {
+    width: 2px;
+    flex: 1;
+    min-height: 20px;
+    background: linear-gradient(to bottom, var(--cyan), transparent);
+    margin: 4px auto;
+  }
+  .flow-content {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 14px 18px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    flex: 1;
+  }
+  .flow-content strong { color: var(--cyan); display: block; margin-bottom: 4px; font-family: var(--mono); font-size: 13px; }
+  .flow-content p { margin: 0; font-size: 13px; }
+
+  /* ── Protocol table ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 13px;
+    margin: 16px 0;
+  }
+  th {
+    background: var(--bg3);
+    color: var(--cyan);
+    padding: 10px 14px;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+  td {
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: var(--bg2); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-family: var(--mono); font-weight: 700; }
+  .tag-tcp  { background: rgba(0,229,255,.15); color: var(--cyan); }
+  .tag-udp  { background: rgba(0,230,118,.15); color: var(--green); }
+  .tag-icmp { background: rgba(255,234,0,.15);  color: var(--yellow); }
+  .tag-arp  { background: rgba(206,147,216,.15); color: var(--purple); }
+  .tag-http { background: rgba(255,82,82,.15);   color: var(--red); }
+
+  /* ── Info box ── */
+  .info, .warn, .tip {
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 13px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .info { background: rgba(0,229,255,.07); border-left: 3px solid var(--cyan); }
+  .warn { background: rgba(255,82,82,.07);  border-left: 3px solid var(--red); }
+  .tip  { background: rgba(0,230,118,.07); border-left: 3px solid var(--green); }
+  .info-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Output demo ── */
+  .terminal {
+    background: #020406;
+    border: 1px solid #1a2a2a;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 16px 0;
+  }
+  .term-bar {
+    background: #0d1a1a;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-bottom: 1px solid #1a2a2a;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot-r { background: #ff5252; }
+  .dot-y { background: #ffea00; }
+  .dot-g { background: #00e676; }
+  .term-title { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-left: 8px; }
+  .term-body {
+    padding: 18px 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.9;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .t-g  { color: #00e676; }
+  .t-c  { color: #00e5ff; }
+  .t-y  { color: #ffea00; }
+  .t-r  { color: #ff5252; }
+  .t-m  { color: #ce93d8; }
+  .t-w  { color: #eceff1; }
+  .t-d  { color: #546e7a; }
+
+  /* ── Subtitle ── */
+  .subtitle {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    margin-bottom: 40px;
+    letter-spacing: 1px;
+  }
+
+  /* ── Layer box ── */
+  .layers {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 16px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .layer {
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .layer:last-child { border-bottom: none; }
+  .layer-n { font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav>
+  <div class="logo">📡 PKT-SNIFF</div>
+  <ul>
+    <li class="group">Overview</li>
+    <li><a href="#what">What is Sniffing?</a></li>
+    <li><a href="#how">How It Works</a></li>
+    <li><a href="#flow">Program Flow</a></li>
+    <li class="group">Code Deep-Dive</li>
+    <li><a href="#pcap4j">Pcap4J Library</a></li>
+    <li><a href="#handle">Packet Handle</a></li>
+    <li><a href="#protocols">Protocol Detection</a></li>
+    <li><a href="#bpf">BPF Filters</a></li>
+    <li class="group">Output</li>
+    <li><a href="#output">Reading Output</a></li>
+    <li><a href="#stats">Statistics</a></li>
+    <li><a href="#run">How to Run</a></li>
+  </ul>
+</nav>
+
+<!-- Main -->
+<main>
+
+  <!-- Banner -->
+  <div class="banner">  ██████╗ ██╗  ██╗████████╗    ███████╗███╗   ██╗██╗███████╗███████╗
+  ██╔══██╗██║ ██╔╝╚══██╔══╝    ██╔════╝████╗  ██║██║██╔════╝██╔════╝
+  ██████╔╝█████╔╝    ██║       ███████╗██╔██╗ ██║██║█████╗  █████╗  
+  ██╔═══╝ ██╔═██╗    ██║       ╚════██║██║╚██╗██║██║██╔══╝  ██╔══╝  
+  ██║     ██║  ██╗   ██║       ███████║██║ ╚████║██║██║     ██║     
+  ╚═╝     ╚═╝  ╚═╝   ╚═╝       ╚══════╝╚═╝  ╚═══╝╚═╝╚═╝     ╚═╝</div>
+
+  <h1>Java Packet Sniffer</h1>
+  <p class="subtitle">— HOW IT WORKS — COMPLETE GUIDE —</p>
+
+  <!-- SECTION 1 -->
+  <section id="what">
+    <h2>01 — What is Packet Sniffing?</h2>
+    <p>Jab bhi aap internet use karte ho — website open karo, message bhejo, video dekho — data <strong>packets</strong> ke form mein travel karta hai network pe.</p>
+    <p>Ek <strong>Packet Sniffer</strong> ek aisa tool hai jo in packets ko "capture" karta hai jab woh aapke network interface se guzarte hain — bilkul waise jaise ek security camera sab kuch record karta hai jo samne se guzre.</p>
+
+    <div class="info">
+      <span class="info-icon">💡</span>
+      <div>Normal mode mein network card sirf apne liye aaye packets leta hai. <strong>Promiscuous Mode</strong> mein woh <em>saare packets</em> capture karta hai — chahe woh kisi ke bhi liye hon.</div>
+    </div>
+
+    <h3>OSI Model — Packets Kahan Se Aate Hain</h3>
+    <div class="layers">
+      <div class="layer" style="background:rgba(255,82,82,.08)">
+        <span>🌐 Layer 7 — Application</span><span class="layer-n">HTTP, DNS, SSH, FTP</span>
+      </div>
+      <div class="layer" style="background:rgba(255,234,0,.05)">
+        <span>📦 Layer 4 — Transport</span><span class="layer-n">TCP, UDP (Ports)</span>
+      </div>
+      <div class="layer" style="background:rgba(0,229,255,.05)">
+        <span>🔢 Layer 3 — Network</span><span class="layer-n">IP Address (IPv4/IPv6)</span>
+      </div>
+      <div class="layer" style="background:rgba(0,230,118,.05)">
+        <span>🔗 Layer 2 — Data Link</span><span class="layer-n">MAC Address, ARP, Ethernet</span>
+      </div>
+      <div class="layer" style="background:rgba(206,147,216,.05)">
+        <span>⚡ Layer 1 — Physical</span><span class="layer-n">Actual bits on the wire</span>
+      </div>
+    </div>
+    <p>Hamara sniffer <strong>Layer 2 se upar</strong> sab kuch capture karta hai — IP, TCP, UDP, ICMP, ARP, aur application protocols bhi.</p>
+  </section>
+
+  <!-- SECTION 2 -->
+  <section id="how">
+    <h2>02 — How It Works (Simple)</h2>
+
+    <div class="terminal">
+      <div class="term-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="term-title">Network Traffic Flow</span>
+      </div>
+      <div class="term-body"><span class="t-g">[ Internet ]</span>
+        ↓ packets travel
+<span class="t-c">[ Router / Switch ]</span>
+        ↓ forwards to your machine
+<span class="t-y">[ Network Interface (eth0/wlan0) ]</span>
+        ↓ our tool intercepts here ← <span class="t-r">CAPTURE POINT</span>
+<span class="t-m">[ libpcap (low-level OS library) ]</span>
+        ↓ passes raw packet bytes
+<span class="t-g">[ Pcap4J (Java wrapper) ]</span>
+        ↓ parses into Java objects
+<span class="t-w">[ PacketSniffer.java ]</span>
+        ↓ extracts IP, port, protocol, payload
+<span class="t-c">[ Terminal Output + Log File ]</span></div>
+    </div>
+  </section>
+
+  <!-- SECTION 3 -->
+  <section id="flow">
+    <h2>03 — Program Flow (Step by Step)</h2>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">1</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>printBanner()</strong>
+          <p>Program start hota hai — ASCII art banner print hoti hai, colors set hote hain ANSI codes se.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">2</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>listInterfaces()</strong>
+          <p><code>Pcaps.findAllDevs()</code> call hoti hai — OS se saari network interfaces ki list milti hai (eth0, wlan0, lo, etc.) apni IP addresses ke saath.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">3</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>User Settings</strong>
+          <p>User choose karta hai: interface, BPF filter, verbose mode, hex dump, log file, packet limit.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">4</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>nif.openLive()</strong>
+          <p>Network interface <strong>Promiscuous Mode</strong> mein open hoti hai — ab woh saare packets capture karegi, sirf apne nahi. snapLen=65536 matlab poora packet capture hoga.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">5</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>Capture Loop</strong>
+          <p><code>handle.getNextPacketEx()</code> baar baar call hoti hai — har baar ek naya packet milta hai jab koi network activity hoti hai.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">6</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-content">
+          <strong>handlePacket()</strong>
+          <p>Packet parse hoti hai: ARP hai? IP hai? TCP/UDP/ICMP? Port numbers se app protocol detect hota hai. Sab kuch terminal pe print hota hai.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left">
+          <div class="flow-dot">7</div>
+        </div>
+        <div class="flow-content">
+          <strong>Ctrl+C → printStats()</strong>
+          <p>Shutdown hook fire hota hai — handle close hota hai, stats print hoti hain, log file save hoti hai.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 4 -->
+  <section id="pcap4j">
+    <h2>04 — Pcap4J Library</h2>
+    <p>Java mein directly raw packets access karna possible nahi — OS allow nahi karta. Isliye hum <strong>libpcap</strong> use karte hain, jo ek C library hai jo OS-level packet capture karta hai.</p>
+    <p><strong>Pcap4J</strong> us C library ka Java wrapper hai — Java code se libpcap functions call hote hain.</p>
+
+    <pre><code><span class="cm">// pom.xml mein ye dependency add ki hai:</span>
+&lt;dependency&gt;
+    &lt;groupId&gt;<span class="str">org.pcap4j</span>&lt;/groupId&gt;
+    &lt;artifactId&gt;<span class="str">pcap4j-core</span>&lt;/artifactId&gt;
+    &lt;version&gt;<span class="num">1.8.2</span>&lt;/version&gt;
+&lt;/dependency&gt;
+
+<span class="cm">// Ye internally libpcap.so (Linux) ya Npcap.dll (Windows) load karta hai</span></code></pre>
+
+    <div class="warn">
+      <span class="info-icon">⚠️</span>
+      <div>Isliye <strong>sudo/root</strong> chahiye hota hai — libpcap ko OS kernel se raw packets access karne ke liye elevated permissions chahiye.</div>
+    </div>
+  </section>
+
+  <!-- SECTION 5 -->
+  <section id="handle">
+    <h2>05 — Packet Handle</h2>
+    <p>Handle ek "connection" hai aapke program aur network interface ke beech. Ye capture session manage karta hai.</p>
+
+    <pre><code><span class="cm">// Interface promiscuous mode mein open karo</span>
+<span class="cls">PcapHandle</span> handle = nif.openLive(
+    <span class="num">65536</span>,                           <span class="cm">// snapLen: max bytes per packet</span>
+    PromiscuousMode.<span class="kw">PROMISCUOUS</span>,    <span class="cm">// saare packets capture karo</span>
+    <span class="num">10</span>                               <span class="cm">// timeout milliseconds</span>
+);
+
+<span class="cm">// BPF filter lagao (optional)</span>
+handle.setFilter(<span class="str">"tcp port 80"</span>, BpfProgram.BpfCompileMode.<span class="kw">OPTIMIZE</span>);
+
+<span class="cm">// Loop mein packets lo</span>
+<span class="kw">while</span> (running) {
+    <span class="cls">Packet</span> pkt = handle.<span class="fn">getNextPacketEx</span>();
+    <span class="fn">handlePacket</span>(pkt, verbose, showHex);
+}</code></pre>
+  </section>
+
+  <!-- SECTION 6 -->
+  <section id="protocols">
+    <h2>06 — Protocol Detection</h2>
+    <p>Pcap4J har packet ko layer by layer parse karta hai. Hamara code check karta hai konsa protocol hai:</p>
+
+    <pre><code><span class="kw">if</span> (packet.contains(<span class="cls">ArpPacket</span>.class)) {
+    <span class="cm">// ARP packet — Layer 2, MAC resolution</span>
+    <span class="cls">ArpPacket</span> arp = packet.get(<span class="cls">ArpPacket</span>.class);
+    srcIP = arp.getHeader().<span class="fn">getSrcProtocolAddr</span>().getHostAddress();
+
+} <span class="kw">else if</span> (packet.contains(<span class="cls">IpV4Packet</span>.class)) {
+    <span class="cls">IpV4Packet</span> ip = packet.get(<span class="cls">IpV4Packet</span>.class);
+    srcIP = ip.getHeader().<span class="fn">getSrcAddr</span>().getHostAddress();
+
+    <span class="kw">if</span> (packet.contains(<span class="cls">TcpPacket</span>.class)) {
+        <span class="cm">// TCP — port numbers check karo</span>
+        <span class="cls">TcpPacket</span> tcp = packet.get(<span class="cls">TcpPacket</span>.class);
+        <span class="kw">int</span> dstPort = tcp.getHeader().<span class="fn">getDstPort</span>().valueAsInt();
+
+    } <span class="kw">else if</span> (packet.contains(<span class="cls">UdpPacket</span>.class)) {
+        <span class="cm">// UDP — connectionless protocol</span>
+
+    } <span class="kw">else if</span> (packet.contains(<span class="cls">IcmpV4CommonPacket</span>.class)) {
+        <span class="cm">// ICMP — ping, traceroute</span>
+    }
+}</code></pre>
+
+    <h3>Application Protocol Detection (Port Numbers Se)</h3>
+    <table>
+      <tr><th>Port</th><th>Protocol</th><th>Example</th></tr>
+      <tr><td><span class="tag tag-http">80</span></td><td>HTTP</td><td>Normal websites</td></tr>
+      <tr><td><span class="tag tag-http">443</span></td><td>HTTPS</td><td>Secure websites (encrypted)</td></tr>
+      <tr><td><span class="tag tag-udp">53</span></td><td>DNS</td><td>Domain name lookup</td></tr>
+      <tr><td><span class="tag tag-tcp">22</span></td><td>SSH</td><td>Remote terminal</td></tr>
+      <tr><td><span class="tag tag-tcp">21</span></td><td>FTP</td><td>File transfer</td></tr>
+      <tr><td><span class="tag tag-tcp">3306</span></td><td>MySQL</td><td>Database queries</td></tr>
+      <tr><td><span class="tag tag-tcp">8080</span></td><td>HTTP-ALT</td><td>Dev servers</td></tr>
+    </table>
+
+    <h3>Protocol Colors in Output</h3>
+    <table>
+      <tr><th>Protocol</th><th>Color</th><th>Description</th></tr>
+      <tr><td><span class="tag tag-tcp">TCP</span></td><td style="color:#00e5ff">Cyan</td><td>Connection-based, reliable delivery</td></tr>
+      <tr><td><span class="tag tag-udp">UDP</span></td><td style="color:#00e676">Green</td><td>Fast, no connection, no guarantee</td></tr>
+      <tr><td><span class="tag tag-icmp">ICMP</span></td><td style="color:#ffea00">Yellow</td><td>Ping, traceroute, network errors</td></tr>
+      <tr><td><span class="tag tag-arp">ARP</span></td><td style="color:#ce93d8">Purple</td><td>MAC address resolution</td></tr>
+    </table>
+  </section>
+
+  <!-- SECTION 7 -->
+  <section id="bpf">
+    <h2>07 — BPF Filters</h2>
+    <p><strong>Berkeley Packet Filter</strong> — ye ek powerful filter language hai jo OS level pe hi packets filter karta hai, program mein aane se pehle. Isse performance bahut better hoti hai.</p>
+
+    <pre><code><span class="cm">// Sirf HTTP traffic</span>
+<span class="str">"tcp port 80"</span>
+
+<span class="cm">// Sirf DNS queries</span>
+<span class="str">"udp port 53"</span>
+
+<span class="cm">// Ek specific IP se/ko</span>
+<span class="str">"host 192.168.1.1"</span>
+
+<span class="cm">// SSH ke ilawa sab kuch</span>
+<span class="str">"not port 22"</span>
+
+<span class="cm">// Sirf ping packets</span>
+<span class="str">"icmp"</span>
+
+<span class="cm">// Ek IP ka sirf HTTP</span>
+<span class="str">"host 192.168.1.5 and tcp port 80"</span>
+
+<span class="cm">// Koi bhi traffic local se bahar</span>
+<span class="str">"src net 192.168.1.0/24"</span></code></pre>
+
+    <div class="tip">
+      <span class="info-icon">✅</span>
+      <div>Filter agar nahi doge toh <strong>saare packets</strong> capture honge — busy network pe ye bahut zyada output de sakta hai. Specific filter use karo jab possible ho.</div>
+    </div>
+  </section>
+
+  <!-- SECTION 8 -->
+  <section id="output">
+    <h2>08 — Output Padhna</h2>
+    <p>Har packet ek line mein show hoti hai. Ye lo ek example output aur uski explanation:</p>
+
+    <div class="terminal">
+      <div class="term-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="term-title">kali@kali — packet sniffer output</span>
+      </div>
+      <div class="term-body">  <span class="t-d">#     Time           Proto   Src              Dst              Size   Info</span>
+  <span class="t-d">─────────────────────────────────────────────────────────────────────────────</span>
+  <span class="t-d">#1   </span><span class="t-d"> 14:22:01.103</span>  <span class="t-c">TCP   </span> <span class="t-y">192.168.1.5    </span>  <span class="t-c">142.250.80.46  </span>  <span class="t-d">84 B</span>   <span class="t-d">52341→443 [HTTPS][SYN]</span>
+  <span class="t-d">#2   </span><span class="t-d"> 14:22:01.210</span>  <span class="t-c">TCP   </span> <span class="t-y">142.250.80.46  </span>  <span class="t-c">192.168.1.5    </span>  <span class="t-d">64 B</span>   <span class="t-d">443→52341 [HTTPS][SYN ACK]</span>
+  <span class="t-d">#3   </span><span class="t-d"> 14:22:01.211</span>  <span class="t-c">TCP   </span> <span class="t-y">192.168.1.5    </span>  <span class="t-c">142.250.80.46  </span>  <span class="t-d">54 B</span>   <span class="t-d">52341→443 [HTTPS][ACK]</span>
+  <span class="t-d">#4   </span><span class="t-d"> 14:22:02.001</span>  <span class="t-g">UDP   </span> <span class="t-y">192.168.1.5    </span>  <span class="t-c">8.8.8.8        </span>  <span class="t-d">72 B</span>   <span class="t-d">49152→53 [DNS]</span>
+  <span class="t-d">#5   </span><span class="t-d"> 14:22:02.045</span>  <span class="t-g">UDP   </span> <span class="t-y">8.8.8.8        </span>  <span class="t-c">192.168.1.5    </span>  <span class="t-d">96 B</span>   <span class="t-d">53→49152 [DNS]</span>
+  <span class="t-d">#6   </span><span class="t-d"> 14:22:03.100</span>  <span class="t-y">ICMP  </span> <span class="t-y">192.168.1.1    </span>  <span class="t-c">192.168.1.5    </span>  <span class="t-d">64 B</span>   <span class="t-d">ECHO_REQUEST</span>
+  <span class="t-d">#7   </span><span class="t-d"> 14:22:03.101</span>  <span class="t-m">ARP   </span> <span class="t-y">192.168.1.1    </span>  <span class="t-c">192.168.1.5    </span>  <span class="t-d">42 B</span>   <span class="t-d">REQUEST</span></div>
+    </div>
+
+    <table style="margin-top:20px">
+      <tr><th>Column</th><th>Matlab</th><th>Example</th></tr>
+      <tr><td><code>#1</code></td><td>Packet number</td><td>Session mein kaun sa packet hai</td></tr>
+      <tr><td><code>14:22:01.103</code></td><td>Time</td><td>Exact timestamp milliseconds tak</td></tr>
+      <tr><td><code>TCP</code></td><td>Protocol</td><td>TCP / UDP / ICMP / ARP</td></tr>
+      <tr><td><code>192.168.1.5</code></td><td>Source IP</td><td>Packet kahan se aaya</td></tr>
+      <tr><td><code>142.250.80.46</code></td><td>Destination IP</td><td>Packet kahan ja raha hai</td></tr>
+      <tr><td><code>84 B</code></td><td>Size</td><td>Packet ka size bytes mein</td></tr>
+      <tr><td><code>52341→443 [HTTPS]</code></td><td>Port info</td><td>Source port → Dest port [App protocol]</td></tr>
+      <tr><td><code>[SYN ACK]</code></td><td>TCP Flags</td><td>Connection state</td></tr>
+    </table>
+
+    <h3>TCP Flags Ka Matlab</h3>
+    <table>
+      <tr><th>Flag</th><th>Matlab</th></tr>
+      <tr><td><code>[SYN]</code></td><td>Connection shuru karna chahta hai (first handshake)</td></tr>
+      <tr><td><code>[SYN ACK]</code></td><td>Server ne accept kiya (second handshake)</td></tr>
+      <tr><td><code>[ACK]</code></td><td>Data receive confirm kiya</td></tr>
+      <tr><td><code>[FIN]</code></td><td>Connection band karna chahta hai</td></tr>
+      <tr><td><code>[RST]</code></td><td>Connection forcefully reset — port closed ya error</td></tr>
+      <tr><td><code>[PSH]</code></td><td>Data abhi bhejo, wait mat karo</td></tr>
+    </table>
+  </section>
+
+  <!-- SECTION 9 -->
+  <section id="stats">
+    <h2>09 — Statistics (Ctrl+C pe)</h2>
+    <p>Jab Ctrl+C press karo, program stop hone se pehle ye summary dikhata hai:</p>
+
+    <div class="terminal">
+      <div class="term-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="term-title">Session Statistics</span>
+      </div>
+      <div class="term-body">  <span class="t-w">╔══════════════════════════════════════════╗</span>
+  <span class="t-w">║           CAPTURE STATISTICS             ║</span>
+  <span class="t-w">╚══════════════════════════════════════════╝</span>
+  <span class="t-g">  Total Packets : <strong>1,247</strong></span>
+  <span class="t-c">  Total Data    : <strong>2.3 MB</strong></span>
+  <span class="t-d">  ──────────────────────────────────────</span>
+  <span class="t-c">  TCP           : 892</span>
+  <span class="t-g">  UDP           : 318</span>
+  <span class="t-y">  ICMP          : 24</span>
+  <span class="t-m">  ARP           : 8</span>
+  <span class="t-d">  Other         : 5</span>
+  <span class="t-d">  ──────────────────────────────────────</span>
+  <span class="t-y">  Log saved to  : capture_20260901_142201.log</span></div>
+    </div>
+
+    <p>Stats <strong>AtomicLong</strong> se track hoti hain — ye thread-safe counter hai jo bina lock ke safe increment hota hai.</p>
+  </section>
+
+  <!-- SECTION 10 -->
+  <section id="run">
+    <h2>10 — Kaise Run Karo</h2>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot">1</div><div class="flow-line"></div></div>
+        <div class="flow-content">
+          <strong>Dependencies Install</strong>
+          <pre style="margin:8px 0 0"><code>sudo apt install default-jdk maven libpcap-dev -y</code></pre>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot">2</div><div class="flow-line"></div></div>
+        <div class="flow-content">
+          <strong>Build Karo</strong>
+          <pre style="margin:8px 0 0"><code>cd packet-sniffer
+mvn package</code></pre>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot">3</div><div class="flow-line"></div></div>
+        <div class="flow-content">
+          <strong>Run Karo (root chahiye)</strong>
+          <pre style="margin:8px 0 0"><code>sudo java -jar target/packet-sniffer.jar
+
+# Ya shortcut:
+chmod +x run.sh && ./run.sh</code></pre>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-left"><div class="flow-dot">4</div></div>
+        <div class="flow-content">
+          <strong>Ctrl+C to Stop</strong>
+          <p>Stats print hongi aur log file save hogi automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="warn">
+      <span class="info-icon">⚠️</span>
+      <div><strong>Sirf apne network pe use karo.</strong> Doosron ke network pe unauthorized packet sniffing illegal hai. Ye tool sirf apne network ki monitoring aur security research ke liye hai.</div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // Active nav highlight on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  window.addEventListener('scroll', () => {
+    let cur = '';
+    sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) cur = s.id; });
+    navLinks.forEach(a => {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + cur);
+    });
+  });
+</script>
+</body>
+</html>
